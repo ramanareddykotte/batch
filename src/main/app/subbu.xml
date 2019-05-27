@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<mule xmlns:file="http://www.mulesoft.org/schema/mule/file" xmlns:dw="http://www.mulesoft.org/schema/mule/ee/dw" xmlns:metadata="http://www.mulesoft.org/schema/mule/metadata" xmlns:json="http://www.mulesoft.org/schema/mule/json" xmlns:batch="http://www.mulesoft.org/schema/mule/batch" xmlns:http="http://www.mulesoft.org/schema/mule/http" xmlns:sfdc="http://www.mulesoft.org/schema/mule/sfdc" xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:spring="http://www.springframework.org/schema/beans" 
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans-current.xsd
+http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+http://www.mulesoft.org/schema/mule/sfdc http://www.mulesoft.org/schema/mule/sfdc/current/mule-sfdc.xsd
+http://www.mulesoft.org/schema/mule/json http://www.mulesoft.org/schema/mule/json/current/mule-json.xsd
+http://www.mulesoft.org/schema/mule/file http://www.mulesoft.org/schema/mule/file/current/mule-file.xsd
+http://www.mulesoft.org/schema/mule/batch http://www.mulesoft.org/schema/mule/batch/current/mule-batch.xsd
+http://www.mulesoft.org/schema/mule/ee/dw http://www.mulesoft.org/schema/mule/ee/dw/current/dw.xsd">
+    <http:listener-config name="HTTP_Listener_Configuration" host="0.0.0.0" port="8081" doc:name="HTTP Listener Configuration"/>
+    <sfdc:config name="Salesforce__Basic_Authentication" username="mula@wipro.com" password="Salesforce@123" securityToken="sMRsZMaNNmURR6jP5Ke8qFHVH" doc:name="Salesforce: Basic Authentication"/>
+    <flow name="subbuFlow">
+        <http:listener config-ref="HTTP_Listener_Configuration" path="/*" doc:name="HTTP"/>
+        <logger message="flow starts" level="INFO" doc:name="Logger"/>
+        <sfdc:query config-ref="Salesforce__Basic_Authentication" query="dsql:SELECT BillingCity,BillingCountry,BillingPostalCode,BillingState,BillingStreet,Name FROM Account" doc:name="Salesforce"/>
+        <json:object-to-json-transformer doc:name="Object to JSON"/>
+        <logger message="....................#[payload]" level="INFO" doc:name="Logger"/>
+    </flow>
+    <batch:job name="subbuBatch">
+        <batch:input>
+            <file:inbound-endpoint path="D:\input" moveToDirectory="D:\backup" responseTimeout="10000" doc:name="File"/>
+            <dw:transform-message doc:name="Transform Message" metadata:id="16d18048-daec-451f-82ae-2f224dec4d0a">
+                <dw:set-payload><![CDATA[%dw 1.0
+%output application/java
+---
+payload map ((payload01 , indexOfPayload01) -> {
+	Name: payload01.Name,
+	BillingStreet: payload01."Billing Street",
+	BillingCity: payload01."Billing City",
+	BillingState: payload01."Billing State",
+	BillingPostalCode: payload01.BillingPostalCode,
+	BillingCountry: payload01."Billing Country"
+})]]></dw:set-payload>
+            </dw:transform-message>
+            <logger message="aaaaa....#[payload]" level="INFO" doc:name="Logger"/>
+        </batch:input>
+        <batch:process-records>
+            <batch:step name="Batch_Step">
+                <logger message=".......#[payload]" level="INFO" doc:name="Logger"/>
+                <enricher source="#[payload.size()&gt;0]" target="#[recordVars.exists]" doc:name="Message Enricher">
+                    <sfdc:query config-ref="Salesforce__Basic_Authentication" query="dsql:SELECT BillingCity,BillingCountry,BillingPostalCode,BillingState,BillingStreet,Name FROM Account WHERE Name = '#[payload.Name]'" doc:name="Salesforce"/>
+                </enricher>
+                <logger message="#[recordVars.exists]" level="INFO" doc:name="Logger"/>
+            </batch:step>
+            <batch:step name="Batch_Step1" accept-expression="#[ !recordVars.exists]">
+                <batch:commit size="100" doc:name="Batch Commit">
+                    <sfdc:create config-ref="Salesforce__Basic_Authentication" type="Account" doc:name="Salesforce">
+                        <sfdc:objects ref="#[payload]"/>
+                    </sfdc:create>
+                </batch:commit>
+            </batch:step>
+        </batch:process-records>
+        <batch:on-complete>
+            <logger message="i got final response...................................." level="INFO" doc:name="Logger"/>
+        </batch:on-complete>
+    </batch:job>
+</mule>
